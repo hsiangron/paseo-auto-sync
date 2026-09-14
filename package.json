@@ -1,0 +1,19 @@
+{
+  "name": "paseo-auto-sync",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "tsx --test server/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.8.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}
