@@ -20,7 +20,7 @@
  *                        （默认保留，因为该记录是 Restore 分支的唯一入口）
  *   --force              daemon 仍在运行时也强行写（不要用，写入会被覆盖）
  */
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -79,13 +79,62 @@ export function isPrunable(record, options = {}) {
   return true;
 }
 
+/**
+ * 收集仍被任何 agent 记录引用的 workspaceId。
+ *
+ * 已归档的 workspace 如果还挂着 agent（常见于 workspace 先被归档、agent 仍活动），
+ * 删掉记录会让那个 agent 指向不存在的 workspace，因此一律保留。
+ *
+ * @param paseoHome Paseo 数据目录。
+ * @returns 被引用到的 workspaceId 集合。
+ */
+async function readReferencedWorkspaceIds(paseoHome) {
+  const agentsDir = path.join(paseoHome, "agents");
+  let files;
+  try {
+    files = await readdir(agentsDir, { recursive: true });
+  } catch {
+    return new Set();
+  }
+  const referenced = new Set();
+  for (const file of files) {
+    if (!file.endsWith(".json")) {
+      continue;
+    }
+    try {
+      const record = JSON.parse(
+        await readFile(path.join(agentsDir, file), "utf8"),
+      );
+      if (typeof record.workspaceId === "string") {
+        referenced.add(record.workspaceId);
+      }
+    } catch {
+      // 单条损坏的 agent 记录不影响其余判断。
+    }
+  }
+  return referenced;
+}
+
 const records = JSON.parse(await readFile(workspacesFile, "utf8"));
 if (!Array.isArray(records)) {
   throw new Error(`${workspacesFile} is not a JSON array`);
 }
 
-const pruned = records.filter((record) => isPrunable(record, { includeWorktrees }));
-const kept = records.filter((record) => !isPrunable(record, { includeWorktrees }));
+const referencedWorkspaceIds = await readReferencedWorkspaceIds(paseoHome);
+const pruned = records.filter(
+  (record) =>
+    isPrunable(record, { includeWorktrees }) &&
+    !referencedWorkspaceIds.has(record.workspaceId),
+);
+const kept = records.filter(
+  (record) =>
+    !isPrunable(record, { includeWorktrees }) ||
+    referencedWorkspaceIds.has(record.workspaceId),
+);
+const keptReferenced = kept.filter(
+  (record) =>
+    record.archivedAt && referencedWorkspaceIds.has(record.workspaceId),
+).length;
 const keptArchivedWorktrees = kept.filter(
   (record) => record.archivedAt && record.isPaseoOwnedWorktree === true,
 ).length;
@@ -101,6 +150,11 @@ for (const record of pruned) {
 if (keptArchivedWorktrees > 0) {
   console.log(
     `  kept ${keptArchivedWorktrees} archived worktree record(s) so their branches stay restorable (--include-worktrees overrides)`,
+  );
+}
+if (keptReferenced > 0) {
+  console.log(
+    `  kept ${keptReferenced} archived record(s) that still have an agent pointing at them`,
   );
 }
 
@@ -122,7 +176,11 @@ await writeFile(tempFile, JSON.stringify(kept, null, 2), "utf8");
 await rename(tempFile, workspacesFile);
 
 const verified = JSON.parse(await readFile(workspacesFile, "utf8"));
-const remaining = verified.filter((record) => isPrunable(record, { includeWorktrees })).length;
+const remaining = verified.filter(
+  (record) =>
+    isPrunable(record, { includeWorktrees }) &&
+    !referencedWorkspaceIds.has(record.workspaceId),
+).length;
 if (remaining !== 0) {
   throw new Error(`prune verification failed: ${remaining} record(s) still present`);
 }
