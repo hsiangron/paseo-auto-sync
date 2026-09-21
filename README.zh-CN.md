@@ -57,21 +57,6 @@ paseo plugin reload paseo-auto-sync
 | `PASEO_AUTO_SYNC_BATCH_SIZE` | `50`（`1`–`50`） | 每次同步最多导入的新会话数 |
 | `PASEO_AUTO_SYNC_INTERVAL_HOURS` | `24`（`1`–`168`） | 定时同步与悬空会话清理间隔 |
 
-## 清理已归档的 workspace 记录
-
-每个导入的会话都会单独占一个 workspace。插件清掉悬空 agent 后会归档该 workspace，因为 Paseo 没有删除单个 workspace 的接口：`paseo workspace` 只有 `archive`，连 `paseo project delete` 也是把要移除的活动 workspace 归档。归档记录会留在 `~/.paseo/projects/workspaces.json`，侧边栏看不到但会持续累积。
-
-workspace registry 只在 daemon 启动时读一次这个文件，之后每次变动都按内存整表重写，所以外部修改只有在重启后重新载入才生效。清理时先停 daemon：
-
-```bash
-paseo daemon stop
-node scripts/prune-archived-workspaces.mjs --dry-run   # 先看会删哪些
-node scripts/prune-archived-workspaces.mjs
-paseo daemon start
-```
-
-脚本在 daemon 运行期间拒绝写入；默认保留 Paseo 自管 worktree 的归档记录（该记录是 Restore 分支的唯一入口）；按 daemon 自己的格式原子重写文件。
-
 ## 开发
 
 ```bash

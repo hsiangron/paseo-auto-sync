@@ -78,29 +78,6 @@ below.
 | `PASEO_AUTO_SYNC_BATCH_SIZE` | `50` (`1`–`50`) | Max new sessions imported per sync |
 | `PASEO_AUTO_SYNC_INTERVAL_HOURS` | `24` (`1`–`168`) | Interval for periodic sync and dangling-session cleanup |
 
-## Cleaning up archived workspace records
-
-Each imported session becomes its own workspace. When the plugin clears a dangling
-agent it archives that workspace, because Paseo has no API that deletes a single
-workspace: `paseo workspace` only offers `archive`, and even `paseo project delete`
-archives the active workspaces it removes. Archived records stay in
-`~/.paseo/projects/workspaces.json` (invisible in the sidebar, but they accumulate).
-
-The workspace registry loads that file once at daemon startup and rewrites the whole
-table from memory on every change, so an external edit only takes effect across a
-restart. Prune with the daemon stopped:
-
-```bash
-paseo daemon stop
-node scripts/prune-archived-workspaces.mjs --dry-run   # list what would go
-node scripts/prune-archived-workspaces.mjs
-paseo daemon start
-```
-
-The script refuses to write while the daemon is running, keeps archived
-Paseo-owned worktree records by default (their record is the only way to restore the
-branch), and rewrites the file atomically in the daemon's own format.
-
 ## Development
 
 ```bash
