@@ -3,23 +3,59 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { discoverLocalSessions, readRegisteredSessionKeys, syncLocalSessions } from "./sync";
+import {
+  discoverLocalSessions,
+  readRegisteredSessionKeys,
+  syncLocalSessions,
+} from "./sync";
 
 test("discovers main Codex and Pi sessions while excluding internal sessions", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "paseo-auto-sync-"));
   try {
     const cwd = path.join(root, "workspace");
-    const codexSessions = path.join(root, ".codex", "sessions", "2026", "09", "14");
+    const codexSessions = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "14",
+    );
+    const archivedSessions = path.join(root, ".codex", "archived_sessions");
     const piSessions = path.join(root, ".pi", "agent", "sessions", "project");
-    await Promise.all([mkdir(cwd), mkdir(codexSessions, { recursive: true }), mkdir(piSessions, { recursive: true })]);
+    await Promise.all([
+      mkdir(cwd),
+      mkdir(codexSessions, { recursive: true }),
+      mkdir(archivedSessions, { recursive: true }),
+      mkdir(piSessions, { recursive: true }),
+    ]);
 
     await writeJsonl(path.join(codexSessions, "main.jsonl"), {
       type: "session_meta",
-      payload: { session_id: "codex-main", cwd, source: "vscode", originator: "codex_cli_rs" },
+      payload: {
+        session_id: "codex-main",
+        cwd,
+        source: "vscode",
+        originator: "codex_cli_rs",
+      },
+    });
+    await writeJsonl(path.join(archivedSessions, "archived.jsonl"), {
+      type: "session_meta",
+      payload: {
+        session_id: "codex-archived",
+        cwd,
+        source: "vscode",
+        originator: "codex_cli_rs",
+      },
     });
     await writeJsonl(path.join(codexSessions, "exec.jsonl"), {
       type: "session_meta",
-      payload: { session_id: "codex-exec", cwd, source: "exec", originator: "codex_exec" },
+      payload: {
+        session_id: "codex-exec",
+        cwd,
+        source: "exec",
+        originator: "codex_exec",
+      },
     });
     await writeJsonl(path.join(piSessions, "main.jsonl"), {
       type: "session",
@@ -38,8 +74,11 @@ test("discovers main Codex and Pi sessions while excluding internal sessions", a
     const result = await discoverLocalSessions({ homeDir: root, env: {} });
 
     assert.deepEqual(
-      result.sessions.map(({ provider, sessionId }) => ({ provider, sessionId })).sort(bySessionId),
+      result.sessions
+        .map(({ provider, sessionId }) => ({ provider, sessionId }))
+        .sort(bySessionId),
       [
+        { provider: "codex", sessionId: "codex-archived" },
         { provider: "codex", sessionId: "codex-main" },
         { provider: "pi", sessionId: "pi-main" },
       ],
@@ -79,7 +118,14 @@ test("imports only unregistered sessions", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "paseo-auto-sync-"));
   try {
     const cwd = path.join(root, "workspace");
-    const codexSessions = path.join(root, ".codex", "sessions", "2026", "09", "14");
+    const codexSessions = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "14",
+    );
     const agents = path.join(root, ".paseo", "agents", "workspace");
     await Promise.all([
       mkdir(cwd),
@@ -88,15 +134,27 @@ test("imports only unregistered sessions", async () => {
     ]);
     await writeJsonl(path.join(codexSessions, "existing.jsonl"), {
       type: "session_meta",
-      payload: { session_id: "existing", cwd, source: "vscode", originator: "codex_cli_rs" },
+      payload: {
+        session_id: "existing",
+        cwd,
+        source: "vscode",
+        originator: "codex_cli_rs",
+      },
     });
     await writeJsonl(path.join(codexSessions, "new.jsonl"), {
       type: "session_meta",
-      payload: { session_id: "new", cwd, source: "vscode", originator: "codex_cli_rs" },
+      payload: {
+        session_id: "new",
+        cwd,
+        source: "vscode",
+        originator: "codex_cli_rs",
+      },
     });
     await writeFile(
       path.join(agents, "agent.json"),
-      JSON.stringify({ persistence: { provider: "codex", sessionId: "existing" } }),
+      JSON.stringify({
+        persistence: { provider: "codex", sessionId: "existing" },
+      }),
     );
     const imported: string[] = [];
 
@@ -121,12 +179,24 @@ test("limits each sync batch and defers active Codex writers", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "paseo-auto-sync-"));
   try {
     const cwd = path.join(root, "workspace");
-    const codexSessions = path.join(root, ".codex", "sessions", "2026", "09", "14");
+    const codexSessions = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "14",
+    );
     await Promise.all([mkdir(cwd), mkdir(codexSessions, { recursive: true })]);
     for (const sessionId of ["one", "two", "three"]) {
       await writeJsonl(path.join(codexSessions, `${sessionId}.jsonl`), {
         type: "session_meta",
-        payload: { session_id: sessionId, cwd, source: "vscode", originator: "codex_cli_rs" },
+        payload: {
+          session_id: sessionId,
+          cwd,
+          source: "vscode",
+          originator: "codex_cli_rs",
+        },
       });
     }
     let attempts = 0;
@@ -152,10 +222,127 @@ test("limits each sync batch and defers active Codex writers", async () => {
   }
 });
 
+test("deletes dangling agents and archives only newly empty workspaces", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "paseo-auto-sync-"));
+  try {
+    const codexSessions = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "21",
+    );
+    const agents = path.join(root, ".paseo", "agents", "workspace");
+    await Promise.all([
+      mkdir(codexSessions, { recursive: true }),
+      mkdir(agents, { recursive: true }),
+    ]);
+
+    // cwd 无效只影响导入；只要 JSONL 仍存在，就不能把 Paseo agent 当成悬空。
+    await writeJsonl(path.join(codexSessions, "existing.jsonl"), {
+      type: "session_meta",
+      payload: {
+        session_id: "codex-existing",
+        cwd: path.join(root, "removed-workspace"),
+        source: "vscode",
+        originator: "codex_cli_rs",
+      },
+    });
+    const records = [
+      {
+        id: "codex-existing-agent",
+        workspaceId: "workspace-existing",
+        lastStatus: "closed",
+        persistence: {
+          provider: "codex",
+          sessionId: "codex-existing",
+          nativeHandle: "codex-existing",
+        },
+      },
+      {
+        id: "pi-orphan",
+        workspaceId: "workspace-orphan",
+        lastStatus: "closed",
+        persistence: {
+          provider: "pi",
+          sessionId: "pi-orphan-session",
+          nativeHandle: path.join(root, "missing-pi.jsonl"),
+        },
+      },
+      {
+        id: "codex-running",
+        workspaceId: "workspace-running",
+        lastStatus: "running",
+        persistence: {
+          provider: "codex",
+          sessionId: "codex-running-session",
+          nativeHandle: "codex-running-session",
+        },
+      },
+      {
+        id: "pi-shared-orphan",
+        workspaceId: "workspace-shared",
+        lastStatus: "idle",
+        persistence: {
+          provider: "pi",
+          sessionId: "pi-shared-session",
+          nativeHandle: path.join(root, "missing-shared-pi.jsonl"),
+        },
+      },
+      {
+        id: "claude-shared",
+        workspaceId: "workspace-shared",
+        lastStatus: "closed",
+        persistence: {
+          provider: "claude",
+          sessionId: "claude-session",
+          nativeHandle: "claude-session",
+        },
+      },
+    ];
+    await Promise.all(
+      records.map((record) =>
+        writeFile(
+          path.join(agents, `${record.id}.json`),
+          JSON.stringify(record),
+        ),
+      ),
+    );
+
+    const deleted: string[] = [];
+    const archived: string[] = [];
+    const result = await syncLocalSessions({
+      homeDir: root,
+      env: {},
+      importSession: async () => {
+        assert.fail("invalid-cwd session must not be imported");
+      },
+      deleteAgent: async (agentId) => {
+        deleted.push(agentId);
+      },
+      archiveWorkspace: async (workspaceId) => {
+        archived.push(workspaceId);
+      },
+    });
+
+    assert.deepEqual(deleted.sort(), ["pi-orphan", "pi-shared-orphan"]);
+    assert.deepEqual(archived, ["workspace-orphan"]);
+    assert.equal(result.deletedDangling.pi, 2);
+    assert.equal(result.skippedRunningDangling.codex, 1);
+    assert.equal(result.archivedEmptyWorkspaces, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function writeJsonl(file: string, value: unknown): Promise<void> {
   await writeFile(file, `${JSON.stringify(value)}\n`);
 }
 
-function bySessionId(left: { sessionId: string }, right: { sessionId: string }): number {
+function bySessionId(
+  left: { sessionId: string },
+  right: { sessionId: string },
+): number {
   return left.sessionId.localeCompare(right.sessionId);
 }
